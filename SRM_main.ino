@@ -25,6 +25,8 @@ eg.
 
 
 LOG:
+07/09/2021
+implemented reset board state to previous state after power down (read EEPROM)
 29/08/2021
 short text menu included
 board state saved into EEPROM
@@ -55,7 +57,7 @@ uint8_t NumBoards;
 // bool WelcMess  = true;
 
 
-char BoardState[2*128];   // Max number of board is 128, 256Byte EEPROM used to store boards state
+char BoardState[256];   // Max number of board is 128, 256Byte EEPROM used to store boards state (each board is 16 bits - 2 Bytes)
 char board[4], state[6];
 char StrBuff[16];
 
@@ -88,7 +90,7 @@ void loop() {
     EEPROM.write(ADDRNumBoards, 1); // Set boards number to 1
     Serial.println("boards number set to 1...done");
     Serial.println("Set board state to 0...");
-    for(int j = ADDRboardState; j <= ADDRboardState + 0x1FF; j++){
+    for(int j = ADDRboardState; j <= ADDRboardState + 0xFF; j++){
         EEPROM.write(j, 0);
         switch(j){
           case 320:
@@ -104,43 +106,53 @@ void loop() {
     }
     Serial.println("100%%...done");   
    }
+  //--------- END OF DEFAULT SETTINGS
 
   // Read and set configuraion from EEPROM
   // Number of boards
   NumBoards = EEPROM.read(ADDRNumBoards);
   // Full boards state
   Serial.print("Restore last state (only EEPROM read)");
-  /*for(int j = 0; j < 256; j++){
-    BoardState[j] = EEPROM.read(ADDRboardState + j);
+  for(int j = ADDRboardState; j <= ADDRboardState + 0xFF; j++){
+    BoardState[j - ADDRboardState] = EEPROM.read(j);
   }
   // Clear Cycle, send a sequence of zeros
   for (int j = 0; j <= 255; j++){
     SPI.transfer16(0);
   }
   delay(1);
+
+  // Reset all the shift registers
+  digitalWrite(MClearPin, LOW);
+  delay(1);
+  digitalWrite(MClearPin, HIGH);
+  digitalWrite(LatchPin, LOW);              // Ensure latch is LOW
   // Write Cycle, read BoardState array to set new state
-  for (int j = 510; j >= 256; j = j - 2){
+  for (char j = NumBoards; j >= 0; j = j - 2){
     //int BoardValue = BoardState[j] << 8 | BoardState[j + 1];
     int BoardValue = BoardState[j + 1] << 8 | BoardState[j];
     //Serial.println(printf("%d\n", BoardValue));
     SPI.transfer16(BoardValue);
-  }*/
+  }
+  digitalWrite(LatchPin, HIGH);              // Ensure latch is HIGH
+  
   Serial.println("...done!");  
+  
   //ReadEEPROM(ADDRboardState, ADDRboardState+255);
    
   // ------------------ WELCOME MESSAGE
-   if(EEPROM.read(ADDRDispWelc) > 0){
-     Serial.println("Shift Register MOSFET controller");
-     Serial.println("Created by Daniele Zannoni daniele.zannoni@uib.no");
-     Serial.println("University of Bergen, Sept.2021");
-     HelpMessage();
-   }
-
-  
-
+  if(EEPROM.read(ADDRDispWelc) > 0){
+    Serial.println("Shift Register MOSFET controller");
+    Serial.println("Created by Daniele Zannoni daniele.zannoni@uib.no");
+    Serial.println("University of Bergen, Sept.2021");
+    HelpMessage();
+  }
+   
   //  ------------------ MAIN LOOP
   while (1) {
-    digitalWrite(MClearPin, HIGH);      // Ensure master clear is HIGH
+    digitalWrite(MClearPin, HIGH);
+    digitalWrite(LatchPin, HIGH);       
+    delay(1);
     digitalWrite(LatchPin, LOW);        // Ensure latch is LOW
     // Read command from serial port ----------------------------------------------
     while (Serial.available() > 0) {
@@ -205,6 +217,7 @@ void loop() {
                 digitalWrite(MClearPin, LOW);      // set MCLR LOW
                 for(int j = ADDRboardState; j <= ADDRboardState + 0x1FF; j++){
                   EEPROM.update(j, 0);
+                  //Serial.println(EEPROM.read(j));
                   switch(j){
                     case 320:
                       Serial.println("25%%...");
@@ -215,18 +228,30 @@ void loop() {
                     case 448:
                       Serial.println("75%%...");
                       break;                      
+                    }
                   }
+                  Serial.println("100%%...done"); 
+                  digitalWrite(MClearPin, HIGH);
+                  digitalWrite(LatchPin, HIGH);       
+                  delay(1);
+                  digitalWrite(LatchPin, LOW);
+                  break;
+              case 'E': // ------------------------------------- E command, read eeprom
+                char bufferz[7];         //the ASCII of the integer will be stored in this char array
+                for(int j = ADDRboardState; j <= ADDRboardState + 255; j++){
+                  BoardState[j - ADDRboardState] = EEPROM.read(j);    
+                  Serial.print(j);
+                  Serial.print("-->");
+                  itoa(BoardState[j - ADDRboardState], bufferz, 10); //(integer, yourBuffer, base)
+                  Serial.println(bufferz);
+                  delay(5);
+                  }
+                break;  
                 }
-                Serial.println("100%%...done"); 
-                digitalWrite(MClearPin, HIGH);
-                digitalWrite(LatchPin, HIGH);       
-                delay(1);
-                digitalWrite(LatchPin, LOW);
-                break;
       }
       // Serial.println(atoi(board)); // Send back values
       // Serial.println(atoi(state)); // Send back values
-    }
+
 
     // New state for board -------------------
     if (NewState == 1){
@@ -252,8 +277,8 @@ void loop() {
       digitalWrite(LatchPin, HIGH);        // Change state of the board
       delay(1);
       // Update state in EEPROM
-      for(int j = 0; j < 256; j++){
-        EEPROM.update(ADDRboardState + j, BoardState[j]);
+      for(int j = ADDRboardState; j <= ADDRboardState + 0xFF; j++){
+        EEPROM.update(j, BoardState[j - ADDRboardState]);
       } 
     }
     // End of new state for board -------------------
